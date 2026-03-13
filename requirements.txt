@@ -1,0 +1,5 @@
+deepchem
+numpy
+torch
+transformers
+genomic-benchmarks
