@@ -22,7 +22,13 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 import numpy as np
-from deepchem.models.torch_models.hf_models import HuggingFaceModel
+try:
+    from deepchem.models.torch_models.hf_models import HuggingFaceModel
+except ImportError:
+    try:
+        from deepchem.models.torch_models.huggingface_model import HuggingFaceModel
+    except ImportError:
+        from deepchem.models.torch_models import HuggingFaceModel
 
 logger = logging.getLogger(__name__)
 
