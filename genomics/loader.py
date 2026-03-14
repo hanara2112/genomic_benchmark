@@ -29,17 +29,13 @@ from genomics.featurizers import (
 
 try:
     import genomic_benchmarks
-    from genomic_benchmarks.data_check import is_downloaded
     from genomic_benchmarks.dataset_getters.pytorch_datasets import get_dataset_path
-    from genomic_benchmarks.utils import download_dataset
 
-    _gb_download = download_dataset
     _HAS_GENOMIC_BENCHMARKS = True
 
 except Exception as e:
     print("IMPORT ERROR:", e)
     _HAS_GENOMIC_BENCHMARKS = False
-
 # Robust import for DummyFeaturizer (compatibility across DC versions)
 try:
     from deepchem.feat.base_classes import DummyFeaturizer
@@ -153,7 +149,8 @@ class _GenomicBenchmarkLoader(_MolnetLoader):
         if not _HAS_GENOMIC_BENCHMARKS:
             raise ImportError("genomic-benchmarks package is required.")
 
-        downloaded_path = pathlib.Path(_gb_download(self.dataset_name))
+        downloaded_path = pathlib.Path(get_dataset_path(self.dataset_name))
+
         self.label_map = {}
         all_seqs, all_labels, all_ids = [], [], []
         split_indices = {"train": [], "valid": [], "test": []}
