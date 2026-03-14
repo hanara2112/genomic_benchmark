@@ -29,14 +29,16 @@ from genomics.featurizers import (
 
 try:
     import genomic_benchmarks
-    # modern API: download_dataset is the helper we want
-    from genomic_benchmarks.utils import download_dataset as _gb_download
+    from genomic_benchmarks.data_check import is_downloaded
+    from genomic_benchmarks.dataset_getters.pytorch_datasets import get_dataset_path
+    from genomic_benchmarks.utils import download_dataset
+
+    _gb_download = download_dataset
     _HAS_GENOMIC_BENCHMARKS = True
+
 except Exception as e:
-    # Print to help debug in notebooks; keep loader safe
-    print("genomic_benchmarks import failed:", e)
+    print("IMPORT ERROR:", e)
     _HAS_GENOMIC_BENCHMARKS = False
-    _gb_download = None
 
 # Robust import for DummyFeaturizer (compatibility across DC versions)
 try:
