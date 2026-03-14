@@ -27,16 +27,17 @@ from genomics.featurizers import (
     DNAOneHotFeaturizer,
 )
 
-# Import genomic benchmarks utilities
 try:
-    from genomic_benchmarks.data_check import is_downloaded
-    from genomic_benchmarks.utils import download_dataset
-
-    _gb_download = download_dataset
+    import genomic_benchmarks
+    # modern API: download_dataset is the helper we want
+    from genomic_benchmarks.utils import download_dataset as _gb_download
     _HAS_GENOMIC_BENCHMARKS = True
-
-except ImportError:
+except Exception as e:
+    # Print to help debug in notebooks; keep loader safe
+    print("genomic_benchmarks import failed:", e)
     _HAS_GENOMIC_BENCHMARKS = False
+    _gb_download = None
+
 # Robust import for DummyFeaturizer (compatibility across DC versions)
 try:
     from deepchem.feat.base_classes import DummyFeaturizer
@@ -150,7 +151,7 @@ class _GenomicBenchmarkLoader(_MolnetLoader):
         if not _HAS_GENOMIC_BENCHMARKS:
             raise ImportError("genomic-benchmarks package is required.")
 
-        downloaded_path = pathlib.Path(_gb_download(self.dataset_name, version=0))
+        downloaded_path = pathlib.Path(_gb_download(self.dataset_name))
         self.label_map = {}
         all_seqs, all_labels, all_ids = [], [], []
         split_indices = {"train": [], "valid": [], "test": []}
