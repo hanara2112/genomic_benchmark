@@ -24,10 +24,27 @@ import torch
 import numpy as np
 from transformers import AutoModelForSequenceClassification
 
+# Robust import for HuggingFaceModel (compatibility across DC versions)
 try:
     from deepchem.models.torch_models import HuggingFaceModel
 except ImportError:
-    from deepchem.models.torch_models.hf_models import HuggingFaceModel
+    try:
+        from deepchem.models.torch_models.hf_models import HuggingFaceModel
+    except ImportError:
+        try:
+            from deepchem.models.hf_models import HuggingFaceModel
+        except ImportError:
+            try:
+                from deepchem.models.torch_models.huggingface_model import HuggingFaceModel
+            except ImportError:
+                # Fallback for older versions where it might be directly in models
+                try:
+                    from deepchem.models import HuggingFaceModel
+                except ImportError:
+                    logger = logging.getLogger(__name__)
+                    logger.error("Could not import HuggingFaceModel from deepchem. "
+                                 "Ensure deepchem is installed with torch support.")
+                    raise ImportError("Could not import HuggingFaceModel from deepchem.")
 
 
 logger = logging.getLogger(__name__)
