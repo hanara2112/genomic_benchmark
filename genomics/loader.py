@@ -27,6 +27,19 @@ from genomics.featurizers import (
     DNAOneHotFeaturizer,
 )
 
+# Check if genomic_benchmarks package exists
+try:
+    from genomic_benchmarks.data_check import is_downloaded
+    from genomic_benchmarks.dataset_getters.pytorch_datasets import (
+        get_dataset,
+        get_dataset_path
+    )
+    from genomic_benchmarks.utils import download_dataset as _gb_download
+
+    _HAS_GENOMIC_BENCHMARKS = True
+except ImportError:
+    _HAS_GENOMIC_BENCHMARKS = False
+
 # Robust import for DummyFeaturizer (compatibility across DC versions)
 try:
     from deepchem.feat.base_classes import DummyFeaturizer
