@@ -5,7 +5,7 @@ and a DNABERT-2 model wrapper, built on top of DeepChem's standard
 abstractions (``Featurizer``, ``NumpyDataset``, ``HuggingFaceModel``).
 """
 
-from genomics.featurizers import DNAOneHotFeaturizer, DNAKmerFeaturizer
+from genomics.featurizers import DNAOneHotFeaturizer, DNAKmerFeaturizer, KmerFrequencyFeaturizer
 
 from genomics.loader import (
     load_genomic_benchmark,
@@ -22,6 +22,7 @@ __all__ = [
     # Featurizers
     "DNAOneHotFeaturizer",
     "DNAKmerFeaturizer",
+    "KmerFrequencyFeaturizer",
     # Dataset loaders
     "load_genomic_benchmark",
     "load_human_nontata_promoters",

@@ -1,9 +1,10 @@
 """DNA sequence featurizers for genomic tasks.
 
-Provides two featurizers that subclass ``deepchem.feat.Featurizer``:
+Provides featurizers that subclass ``deepchem.feat.Featurizer``:
 
 * :class:`DNAOneHotFeaturizer` — fixed-length one-hot encoding
 * :class:`DNAKmerFeaturizer` — overlapping k-mer tokenization
+* :class:`KmerFrequencyFeaturizer` — returns frequencies of k-mers
 
 Both follow DeepChem's featurizer contract: implement ``_featurize(datapoint)``
 and are called via ``featurize(datapoints)``.
@@ -11,6 +12,7 @@ and are called via ``featurize(datapoints)``.
 Target location in DeepChem: ``deepchem/feat/dna_featurizers.py``
 """
 
+import itertools
 import logging
 from typing import Dict, List, Optional, Union
 
@@ -125,8 +127,52 @@ class DNAOneHotFeaturizer(Featurizer):
         return encoding
 
 
+class DNAKmerCountFeaturizer(Featurizer):
+    """Featurize DNA sequences into k-mer frequency vectors (Bag-of-Kmers).
+
+    This featurizer counts the occurrences of all possible k-mers in a
+    sequence and returns a normalized or raw frequency vector of size 4^k.
+    For example, for k=2, the vector size is 16 (AA, AC, AG, AT, CA, ...).
+
+    Parameters
+    ----------
+    k : int, default 3
+        The length of k-mers to count.
+    normalize : bool, default True
+        If True, the counts are divided by the total number of k-mers
+        in the sequence to produce frequencies that sum to 1.0.
+    """
+
+    def __init__(self, k: int = 3, normalize: bool = True):
+        self.k = k
+        self.normalize = normalize
+        
+        # Pre-generate all possible k-mers in alphabetical order
+        from itertools import product
+        self._kmers = ["".join(p) for p in product("ACGT", repeat=k)]
+        self._kmer_to_idx = {kmer: i for i, kmer in enumerate(self._kmers)}
+
+    def _featurize(self, datapoint: str, **kwargs) -> np.ndarray:
+        """Calculate k-mer frequencies for a sequence."""
+        seq = datapoint.upper()
+        counts = np.zeros(4**self.k, dtype=np.float32)
+        
+        # Sliding window count
+        valid_kmers = 0
+        for i in range(len(seq) - self.k + 1):
+            kmer = seq[i : i + self.k]
+            if kmer in self._kmer_to_idx:
+                counts[self._kmer_to_idx[kmer]] += 1
+                valid_kmers += 1
+        
+        if self.normalize and valid_kmers > 0:
+            counts /= valid_kmers
+            
+        return counts
+
+
 class DNAKmerFeaturizer(Featurizer):
-    """Convert DNA sequences into overlapping k-mer token lists.
+    """Tokenize DNA sequences into overlapping k-mers.
 
     K-mer tokenization is a standard preprocessing step for genomic
     language models. A sliding window of width ``k`` is moved across
@@ -216,3 +262,65 @@ class DNAKmerFeaturizer(Featurizer):
                 [self.vocab.get(km, 0) for km in kmers], dtype=np.int64
             )
         return kmers
+
+
+class KmerFrequencyFeaturizer(Featurizer):
+    """Calculate the frequency of each k-mer in a DNA sequence.
+    
+    This featurizer returns a numerical array of shape ``(4^k,)`` representing 
+    the counts (or normalized frequencies) of all possible k-mers in the sequence.
+    This is highly useful for traditional machine learning models (like Random Forest)
+    that require fixed-size dense numerical vectors, unlike the token strings returned
+    by :class:`DNAKmerFeaturizer`. Ambiguous nucleotides (like ``N``) simply do not increment 
+    the purely ACGT kmers.
+
+    Parameters
+    ----------
+    k : int, default 4
+        Length of each k-mer token.
+
+    Examples
+    --------
+    >>> featurizer = KmerFrequencyFeaturizer(k=2)
+    >>> result = featurizer.featurize(["ACGT"])
+    >>> result.shape
+    (1, 16)
+    
+    Note
+    ----
+    This featurizer natively pads inputs to a fixed feature width depending on ``k``
+    and requires only ``numpy``.
+    """
+    def __init__(self, k: int = 4):
+        self.k = k
+        self.kmers = [''.join(p) for p in itertools.product('ACGT', repeat=k)]
+        self.kmer_to_idx = {km: i for i, km in enumerate(self.kmers)}
+        self.vocab_size = len(self.kmers)
+
+    def _featurize(self, datapoint: str, **kwargs) -> np.ndarray:
+        """Extract k-mer frequencies from a single DNA sequence.
+
+        Parameters
+        ----------
+        datapoint : str
+            A DNA sequence string.
+
+        Returns
+        -------
+        np.ndarray
+            A 1D array of shape ``(4^k,)``, dtype ``float32``, containing counts of each k-mer.
+        """
+        seq = datapoint.upper()
+        freqs = np.zeros(self.vocab_size, dtype=np.float32)
+
+        for i in range(len(seq) - self.k + 1):
+            kmer = seq[i:i + self.k]
+            idx = self.kmer_to_idx.get(kmer)
+            if idx is not None:
+                freqs[idx] += 1.0
+
+        total = len(seq) - self.k + 1
+        if total > 0:
+            freqs /= total
+
+        return freqs

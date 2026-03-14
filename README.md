@@ -29,6 +29,7 @@ Raw DNA sequences (FASTA / CSV / GenomicsBenchmarks)
         ▼
 [1] Loader (load_genomic_benchmark)
         │   Downloads via genomic-benchmarks package
+        │   Preserves official benchmark test split
         │   Returns (tasks, datasets, transformers) — MolNet convention
         ▼
 [2] Featurizer (DNAOneHotFeaturizer / DNAKmerFeaturizer)
@@ -37,7 +38,7 @@ Raw DNA sequences (FASTA / CSV / GenomicsBenchmarks)
         ▼
 [3] Dataset (NumpyDataset)
         │   Holds (X, y, w, ids)
-        │   Split via dc.splits.RandomSplitter
+        │   Splits validation from official train when needed
         ▼
 [4] Model (DNABERT2Model)
         │   Subclasses dc.models.torch_models.HuggingFaceModel
@@ -65,7 +66,7 @@ dc-genomics-review/
 └── tests/
     ├── conftest.py                ← Shared fixtures
     ├── test_featurizers.py        ← 21 featurizer tests
-    ├── test_loader.py             ← 5 loader tests
+    ├── test_loader.py             ← 8 loader tests
     └── test_dnabert2.py           ← 6 model tests
 ```
 
@@ -91,11 +92,11 @@ dc-genomics-review/
 | Decision | Rationale |
 |----------|-----------|
 | BPE tokenization in model wrapper, not featurizer | Matches ChemBERTa pattern. `_prepare_batch` tokenizes raw strings on-the-fly. |
-| `NumpyDataset` in loader, not `DiskDataset` | Genomic benchmark datasets fit in memory. Simpler for review. |
+| Preserve official test split | Benchmark semantics matter more than reusing MolNet's default "split one dataset randomly" pattern. |
 | Two featurizers in one file | Share constants (`BASE_TO_INDEX`), both are small. Reviewer sees all featurizer logic in one place. |
 | One model (DNABERT-2) only | Once the pattern is accepted, NucleotideTransformer follows identically. Keeps review surface minimal. |
 | `DummyFeaturizer` for transformer models | Raw DNA sequences stored in `X`, tokenized at train time. Standard DeepChem HuggingFace pattern. |
-| `RandomSplitter` for genomics | DNA sequences lack molecule scaffolds. Chromosome-aware splitting is a future enhancement. |
+| Split only the official train set when no validation split exists | Keeps the benchmark's held-out test set untouched while still yielding a train/valid/test tuple. |
 
 ## References
 
