@@ -29,7 +29,7 @@ from genomics.featurizers import (
 
 try:
     import genomic_benchmarks
-    from genomic_benchmarks.dataset_getters.pytorch_datasets import get_dataset_path
+    from genomic_benchmarks.loc2seq import download_dataset
 
     _HAS_GENOMIC_BENCHMARKS = True
 
@@ -149,7 +149,7 @@ class _GenomicBenchmarkLoader(_MolnetLoader):
         if not _HAS_GENOMIC_BENCHMARKS:
             raise ImportError("genomic-benchmarks package is required.")
 
-        downloaded_path = pathlib.Path(get_dataset_path(self.dataset_name))
+        downloaded_path = pathlib.Path(download_dataset(self.dataset_name))
 
         self.label_map = {}
         all_seqs, all_labels, all_ids = [], [], []
