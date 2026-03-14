@@ -32,6 +32,17 @@ from genomics.featurizers import (
     DNAOneHotFeaturizer,
 )
 
+# Robust import for DummyFeaturizer (compatibility across DC versions)
+try:
+    from deepchem.feat.base_classes import DummyFeaturizer
+except ImportError:
+    try:
+        from deepchem.feat import DummyFeaturizer
+    except ImportError:
+        # Final fallback: define a proxy if it simply doesn't exist
+        class DummyFeaturizer:
+            pass
+
 try:
     from genomic_benchmarks.loc2seq import download_dataset as _gb_download
     _HAS_GENOMIC_BENCHMARKS = True
@@ -203,7 +214,8 @@ class _GenomicBenchmarkLoader(_MolnetLoader):
         y = np.array(all_labels, dtype=np.float32).reshape(-1, 1)
         w = np.ones_like(y)
 
-        if self.featurizer is not None and not isinstance(self.featurizer, dc.feat.DummyFeaturizer):
+        # Use the robust DummyFeaturizer check
+        if self.featurizer is not None and not isinstance(self.featurizer, DummyFeaturizer):
             logger.info("Featurizing dataset...")
             X = self.featurizer.featurize(X)
 
