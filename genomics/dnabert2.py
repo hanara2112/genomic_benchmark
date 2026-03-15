@@ -75,6 +75,18 @@ def _load_pretrained_state_dict(model_path: str) -> Dict[str, Any]:
         return torch.load(path, map_location="cpu", weights_only=True)
 
 
+def _materialize_meta_tensors(module: torch.nn.Module) -> None:
+    """Move any parameters/buffers on device 'meta' to CPU (custom from_config can leave them on meta)."""
+    for _, param in module.named_parameters(recurse=True):
+        if getattr(param, "device", None) and str(param.device) == "meta":
+            param.data = torch.empty_like(param, device="cpu")
+    for name, buf in module.named_buffers(recurse=True):
+        if getattr(buf, "device", None) and str(buf.device) == "meta":
+            parts = name.split(".")
+            parent = module.get_submodule(".".join(parts[:-1])) if len(parts) > 1 else module
+            parent.register_buffer(parts[-1], torch.empty_like(buf, device="cpu"))
+
+
 def _stub_flash_attn_if_needed() -> None:
     """Stub flash_attn so DNABERT-2 custom code can load without the optional dependency."""
     _fake = types.ModuleType("flash_attn_triton")
@@ -222,6 +234,9 @@ class DNABERT2Model(HuggingFaceModel):
             model.load_state_dict(state, strict=False)
         else:
             raise ValueError(f"Invalid task '{task}'.")
+
+        _materialize_meta_tensors(model)
+        model = model.to("cpu")
 
         super().__init__(
             model=model,
