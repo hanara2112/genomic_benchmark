@@ -181,7 +181,7 @@ class DNABERT2Model(HuggingFaceModel):
 
         config_dict: Dict[str, Any] = config if config is not None else {}
 
-        # Load BPE tokenizer (same pattern as ChemBERTa / NucleotideTransformer)
+        # Load BPE tokenizer
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
             trust_remote_code=True,
