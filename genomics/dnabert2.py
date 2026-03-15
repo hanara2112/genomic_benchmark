@@ -194,8 +194,8 @@ class DNABERT2Model(HuggingFaceModel):
                 hf_config.problem_type = "multi_label_classification"
                 hf_config.num_labels = n_tasks
 
-        # Load model via transformers from_pretrained (avoids direct hf_hub/safetensors import)
-        _tr = dict(trust_remote_code=True)
+        # Load model on CPU with real tensors (avoid device_map="meta" / low_cpu_mem_usage)
+        _tr = dict(trust_remote_code=True, low_cpu_mem_usage=False)
         if task == "mlm":
             model = AutoModelForMaskedLM.from_pretrained(
                 model_path, config=hf_config, **_tr
@@ -221,6 +221,8 @@ class DNABERT2Model(HuggingFaceModel):
                 del _pretrained
         else:
             raise ValueError(f"Invalid task '{task}'.")
+
+        model = model.to("cpu")
 
         super().__init__(
             model=model,
