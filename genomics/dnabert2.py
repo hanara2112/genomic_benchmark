@@ -40,8 +40,10 @@ except (ImportError, ModuleNotFoundError):
 
             def forward(self, inputs: Dict[str, torch.Tensor]) -> Any:
                 out = self.hf_model(**inputs)
-                pred = getattr(out, "logits", None) or getattr(out, "last_hidden_state", None)
-                if pred is None and isinstance(out, (tuple, list)) and out:
+                pred = getattr(out, "logits", None)
+                if pred is None:
+                    pred = getattr(out, "last_hidden_state", None)
+                if pred is None and isinstance(out, (tuple, list)) and len(out) > 0:
                     pred = out[0]
                 loss = getattr(out, "loss", None)
                 return (pred, loss) if loss is not None else pred
