@@ -41,21 +41,24 @@ class SimpleCNN(nn.Module):
         return logits
 
 
-class SimpleLSTM(nn.Module):
-    def __init__(self, vocab_size=4, embedding_dim=16, hidden_dim=32, n_classes=2):
+from deepchem.models.torch_models.attention import SelfAttention
+
+class AttentionModel(nn.Module):
+    def __init__(self, seq_length=256, n_features=4, n_classes=2):
         super().__init__()
-        self.embedding = nn.Linear(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, bidirectional=True)
-        self.fc = nn.Linear(hidden_dim * 2, n_classes)
+        # DeepChem's built-in SelfAttention block
+        self.attn = SelfAttention(n_features)
+        
+        # Flatten the sequence and predict
+        self.fc = nn.Linear(seq_length * n_features, n_classes)
 
     def forward(self, x):
-        # x is (batch, seq_len, 4) from OneHot
-        embeds = self.embedding(x)
-        lstm_out, _ = self.lstm(embeds)
-        # pool over sequence (mean pooling)
-        pooled = torch.mean(lstm_out, dim=1)
-        logits = self.fc(pooled)
+        # x shape: (batch_size, seq_length, n_features)
+        attn_out = self.attn(x)
+        flattened = torch.flatten(attn_out, start_dim=1)
+        logits = self.fc(flattened)
         return logits
+
 
 def _loss_fn(outputs, labels, weights):
     # outputs is logits
@@ -124,8 +127,8 @@ def train_cnn(dataset_name, max_seq_length):
     return score, duration
 
 
-def train_lstm(dataset_name, max_seq_length):
-    logger.info("Loading BiLSTM (OneHot) data...")
+def train_attn(dataset_name, max_seq_length):
+    logger.info("Loading Attention (OneHot) data...")
     tasks, datasets, _ = load_genomic_benchmark(
         dataset_name=dataset_name,
         featurizer=DNAOneHotFeaturizer(max_length=max_seq_length),
@@ -135,7 +138,7 @@ def train_lstm(dataset_name, max_seq_length):
     train, test = datasets[0], datasets[-1]
     
     start_time = time.time()
-    pytorch_model = SimpleLSTM()
+    pytorch_model = AttentionModel(seq_length=max_seq_length, n_features=4, n_classes=2)
     model = TorchModel(
         pytorch_model,
         loss=_loss_fn,
@@ -144,7 +147,6 @@ def train_lstm(dataset_name, max_seq_length):
         learning_rate=1e-3,
     )
     
-    # Needs categorical to long for cross entropy loss
     def _generator(dataset, batch_size):
         for batch in dataset.iterbatches(batch_size):
             yield (batch[0], batch[1].astype(np.int64), batch[2])
@@ -154,7 +156,6 @@ def train_lstm(dataset_name, max_seq_length):
     
     metric = dc.metrics.Metric(dc.metrics.roc_auc_score, mode="classification")
     
-    # Softmax the logits back to probabilities for ROC-AUC
     preds = model.predict(test)
     probs = np.exp(preds) / np.sum(np.exp(preds), axis=-1, keepdims=True)
     score = metric.compute_metric(test.y, probs, test.w)
@@ -194,7 +195,7 @@ def train_bert(dataset_name, max_seq_length):
 def main():
     parser = argparse.ArgumentParser(description="Full Model Benchmark Sweep")
     parser.add_argument("--datasets", nargs="+", default=["dummy_mouse_enhancers_ensembl", "human_nontata_promoters"])
-    parser.add_argument("--models", nargs="+", default=["rf", "cnn", "lstm", "dnabert2"])
+    parser.add_argument("--models", nargs="+", default=["rf", "cnn", "attn", "dnabert2"])
     parser.add_argument("--max_seq_length", type=int, default=256)
     parser.add_argument("--output", type=str, default="benchmark_results.json")
     args = parser.parse_args()
@@ -210,7 +211,7 @@ def main():
         runs = {
             "rf": train_rf,
             "cnn": train_cnn,
-            "lstm": train_lstm,
+            "attn": train_attn,
             "dnabert2": train_bert,
         }
         

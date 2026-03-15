@@ -278,7 +278,11 @@ class DNABERT2Model(HuggingFaceModel):
         """
         inputs, labels, weights = batch
         # Note: We keep ambiguous bases ('N') as DNABERT-2's BPE handles them via subword fallback.
-        sequences = [seq.upper() for seq in inputs[0]]
+        # inputs[0] is the batch of DNA sequences. We handle both (B,) and (B, 1) shapes.
+        X_batch = inputs[0]
+        if len(X_batch.shape) > 1:
+            X_batch = X_batch.flatten()
+        sequences = [str(seq).upper() for seq in X_batch]
 
         # Tokenizer automatically generates input_ids and attention_mask.
         # Sequences are padded/truncated to max_seq_length for uniform batch tensors.
