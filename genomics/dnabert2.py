@@ -277,8 +277,11 @@ class DNABERT2Model(HuggingFaceModel):
             Weight tensor.
         """
         inputs, labels, weights = batch
-        sequences = [seq.upper().replace("N", "") for seq in inputs[0]]
+        # Note: We keep ambiguous bases ('N') as DNABERT-2's BPE handles them via subword fallback.
+        sequences = [seq.upper() for seq in inputs[0]]
 
+        # Tokenizer automatically generates input_ids and attention_mask.
+        # Sequences are padded/truncated to max_seq_length for uniform batch tensors.
         tokens = self.tokenizer(
             sequences,
             padding=True,

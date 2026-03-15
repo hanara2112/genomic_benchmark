@@ -9,7 +9,6 @@ from genomics.featurizers import (
     DNAKmerCountFeaturizer,
     DNAKmerFeaturizer,
     DNAOneHotFeaturizer,
-    KmerFrequencyFeaturizer,
 )
 
 from genomics.loader import (
@@ -28,7 +27,6 @@ __all__ = [
     "DNAKmerCountFeaturizer",
     "DNAKmerFeaturizer",
     "DNAOneHotFeaturizer",
-    "KmerFrequencyFeaturizer",
     # Dataset loaders
     "load_genomic_benchmark",
     "load_human_nontata_promoters",

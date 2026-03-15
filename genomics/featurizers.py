@@ -4,7 +4,6 @@ Provides featurizers that subclass ``deepchem.feat.Featurizer``:
 
 * :class:`DNAOneHotFeaturizer` — fixed-length one-hot encoding
 * :class:`DNAKmerFeaturizer` — overlapping k-mer tokenization
-* :class:`KmerFrequencyFeaturizer` — returns frequencies of k-mers
 
 Both follow DeepChem's featurizer contract: implement ``_featurize(datapoint)``
 and are called via ``featurize(datapoints)``.
@@ -264,63 +263,3 @@ class DNAKmerFeaturizer(Featurizer):
         return kmers
 
 
-class KmerFrequencyFeaturizer(Featurizer):
-    """Calculate the frequency of each k-mer in a DNA sequence.
-    
-    This featurizer returns a numerical array of shape ``(4^k,)`` representing 
-    the counts (or normalized frequencies) of all possible k-mers in the sequence.
-    This is highly useful for traditional machine learning models (like Random Forest)
-    that require fixed-size dense numerical vectors, unlike the token strings returned
-    by :class:`DNAKmerFeaturizer`. Ambiguous nucleotides (like ``N``) simply do not increment 
-    the purely ACGT kmers.
-
-    Parameters
-    ----------
-    k : int, default 4
-        Length of each k-mer token.
-
-    Examples
-    --------
-    >>> featurizer = KmerFrequencyFeaturizer(k=2)
-    >>> result = featurizer.featurize(["ACGT"])
-    >>> result.shape
-    (1, 16)
-    
-    Note
-    ----
-    This featurizer natively pads inputs to a fixed feature width depending on ``k``
-    and requires only ``numpy``.
-    """
-    def __init__(self, k: int = 4):
-        self.k = k
-        self.kmers = [''.join(p) for p in itertools.product('ACGT', repeat=k)]
-        self.kmer_to_idx = {km: i for i, km in enumerate(self.kmers)}
-        self.vocab_size = len(self.kmers)
-
-    def _featurize(self, datapoint: str, **kwargs) -> np.ndarray:
-        """Extract k-mer frequencies from a single DNA sequence.
-
-        Parameters
-        ----------
-        datapoint : str
-            A DNA sequence string.
-
-        Returns
-        -------
-        np.ndarray
-            A 1D array of shape ``(4^k,)``, dtype ``float32``, containing counts of each k-mer.
-        """
-        seq = datapoint.upper()
-        freqs = np.zeros(self.vocab_size, dtype=np.float32)
-
-        for i in range(len(seq) - self.k + 1):
-            kmer = seq[i:i + self.k]
-            idx = self.kmer_to_idx.get(kmer)
-            if idx is not None:
-                freqs[idx] += 1.0
-
-        total = len(seq) - self.k + 1
-        if total > 0:
-            freqs /= total
-
-        return freqs

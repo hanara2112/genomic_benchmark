@@ -32,8 +32,8 @@ def main():
     # ── 1. Load dataset ──────────────────────────────────────────
     logger.info("Loading dataset...")
     tasks, datasets, transformers = load_genomic_benchmark(
-        dataset_name="dummy_mouse_enhancers_ensembl",
-        splitter="random",
+        dataset_name="human_non_tata_promoters",
+        splitter="official",
         reload=False,
     )
     # Handle 2 (train, test) or 3 (train, valid, test) splits

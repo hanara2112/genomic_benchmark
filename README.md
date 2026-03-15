@@ -2,8 +2,11 @@
 
 **Standalone review repo for DeepChem genomic sequence support.**
 
-PR-review-ready repository that demonstrates a complete DeepChem-style genomics pipeline: featurizer → loader → model → evaluation. 
+This repo contains a DeepChem-compatible wrapper for DNABERT-2 and a tutorial notebook (`examples/Tutorial.ipynb`) demonstrating usage on the Human Non-TATA Promoters benchmark. The wrapper lives at `genomics/dnabert2.py`. To run a quick smoke test (CPU, <1 min): install requirements (`pip install -r requirements.txt`), open the notebook, and run the `SMOKE TEST` cell. For full training you'll need a GPU and the model weights (instructions below). Tested on: deepchem==2.8.0, transformers==4.40.0, torch==2.1.0.
 
+A minimal, PR-review-ready repository that demonstrates a complete DeepChem-style genomics pipeline: featurizer → loader → model → evaluation. Designed for a DeepChem maintainer to scan in one sitting.
+
+**Full results & proposal:** All benchmark details and interpretation → **[docs/RESULTS.md](docs/RESULTS.md)**. **GSoC final proposal** → **[docs/GSoC_PROPOSAL_FINAL.md](docs/GSoC_PROPOSAL_FINAL.md)**.
 ### Key results
 
 On **dummy_mouse_enhancers_ensembl** (1.2K sequences), DNABERT-2 reaches **0.816 test ROC-AUC** (best of four models); on **human_nontata_promoters**, Random Forest reaches **0.98** and DNABERT-2 **0.966** test ROC-AUC with one epoch.
