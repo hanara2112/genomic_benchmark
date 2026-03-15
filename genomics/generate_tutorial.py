@@ -167,8 +167,11 @@ nb['cells'] = [
     nbf.v4.new_code_cell(section5_code)
 ]
 
-# Use absolute path to ensure saving
-save_path = '/Users/aryamanbahl/IIITH/opensource/dc-genomics-review/examples/tutorial.ipynb'
+# Save next to this script or in repo examples/
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_repo_root = os.path.dirname(_script_dir)
+save_path = os.path.join(_repo_root, "examples", "tutorial.ipynb")
+os.makedirs(os.path.dirname(save_path), exist_ok=True)
 with open(save_path, 'w') as f:
     nbf.write(nb, f)
 

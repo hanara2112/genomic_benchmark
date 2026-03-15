@@ -21,63 +21,31 @@ import types
 from typing import Any, Dict, Optional, Tuple
 
 import torch
-import numpy as np
-from transformers import AutoModelForSequenceClassification
 
-# Robust import for HuggingFaceModel (compatibility across DC versions)
+logger = logging.getLogger(__name__)
+
+# HuggingFaceModel import: same pattern as ProtBERT/ChemBERTa in DeepChem.
 try:
     from deepchem.models.torch_models import HuggingFaceModel
 except ImportError:
     try:
         from deepchem.models.torch_models.hf_models import HuggingFaceModel
-    except ImportError:
-        try:
-            from deepchem.models.hf_models import HuggingFaceModel
-        except ImportError:
-            try:
-                from deepchem.models.torch_models.huggingface_model import HuggingFaceModel
-            except ImportError:
-                # Fallback for older versions where it might be directly in models
-                try:
-                    from deepchem.models import HuggingFaceModel
-                except ImportError:
-                    logger = logging.getLogger(__name__)
-                    logger.error("Could not import HuggingFaceModel from deepchem. "
-                                 "Ensure deepchem is installed with torch support.")
-                    raise ImportError("Could not import HuggingFaceModel from deepchem.")
-
-
-logger = logging.getLogger(__name__)
+    except ImportError as e:
+        raise ImportError(
+            "HuggingFaceModel not found. Install DeepChem with PyTorch and "
+            "transformers: pip install 'deepchem[torch]' transformers"
+        ) from e
 
 _DEFAULT_MODEL_PATH = "zhihan1996/DNABERT-2-117M"
 
 
-def _download_state_dict(model_path: str) -> Dict[str, Any]:
-    """Download pretrained weights from the HuggingFace Hub.
-
-    Tries safetensors first, falls back to pytorch_model.bin.
-
-    Parameters
-    ----------
-    model_path : str
-        HuggingFace Hub model ID.
-
-    Returns
-    -------
-    dict
-        Model state dict.
-    """
-    from huggingface_hub import hf_hub_download
-
-    try:
-        path = hf_hub_download(model_path, "model.safetensors")
-        from safetensors.torch import load_file
-        return load_file(path)
-    except Exception:
-        pass
-
-    path = hf_hub_download(model_path, "pytorch_model.bin")
-    return torch.load(path, map_location="cpu", weights_only=True)
+def _stub_flash_attn_if_needed() -> None:
+    """Stub flash_attn so DNABERT-2 custom code can load without the optional dependency."""
+    _fake = types.ModuleType("flash_attn_triton")
+    _fake.flash_attn_qkvpacked_func = None  # type: ignore[attr-defined]
+    for key in list(sys.modules.keys()):
+        if "flash_attn_triton" in key:
+            sys.modules[key] = _fake
 
 
 class DNABERT2Model(HuggingFaceModel):
@@ -153,19 +121,21 @@ class DNABERT2Model(HuggingFaceModel):
             AutoTokenizer,
         )
 
+        _stub_flash_attn_if_needed()
+
         self.n_tasks = n_tasks
         self.max_seq_length = max_seq_length
 
         config_dict: Dict[str, Any] = config if config is not None else {}
 
-        # Load BPE tokenizer (handles tokenization inside _prepare_batch)
+        # Load BPE tokenizer (same pattern as ChemBERTa / NucleotideTransformer)
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
             trust_remote_code=True,
             model_max_length=max_seq_length,
         )
 
-        # Load and patch config
+        # Load and patch config (fixes config_class mismatch on HF Hub)
         hf_config = AutoConfig.from_pretrained(
             model_path,
             trust_remote_code=True,
@@ -188,14 +158,7 @@ class DNABERT2Model(HuggingFaceModel):
         if getattr(hf_config, "attention_probs_dropout_prob", 0.0) == 0.0:
             hf_config.attention_probs_dropout_prob = 1e-8
 
-        # Disable flash attention workaround (not available on all hardware)
-        _fake_flash = types.ModuleType("flash_attn_triton")
-        _fake_flash.flash_attn_qkvpacked_func = None  # type: ignore
-        for _key in list(sys.modules.keys()):
-            if "flash_attn_triton" in _key:
-                sys.modules[_key] = _fake_flash
-
-        # Configure task-specific model head
+        # Task-specific config 
         if task in ("regression", "mtr"):
             hf_config.num_labels = n_tasks
             hf_config.problem_type = "regression"
@@ -207,22 +170,33 @@ class DNABERT2Model(HuggingFaceModel):
                 hf_config.problem_type = "multi_label_classification"
                 hf_config.num_labels = n_tasks
 
-        # Instantiate model architecture
-        _cfg_kw = dict(trust_remote_code=True)
+        # Load model via transformers from_pretrained (avoids direct hf_hub/safetensors import)
+        _tr = dict(trust_remote_code=True)
         if task == "mlm":
-            model = AutoModelForMaskedLM.from_config(hf_config, **_cfg_kw)
-        elif task in ("classification", "regression", "mtr"):
-            model = AutoModelForSequenceClassification.from_config(
-                hf_config, **_cfg_kw
+            model = AutoModelForMaskedLM.from_pretrained(
+                model_path, config=hf_config, **_tr
             )
         elif task == "feature_extractor":
-            model = AutoModel.from_config(hf_config, **_cfg_kw)
+            model = AutoModel.from_pretrained(
+                model_path, config=hf_config, **_tr
+            )
+        elif task in ("classification", "regression", "mtr"):
+            try:
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    model_path, config=hf_config, **_tr
+                )
+            except (OSError, ValueError, TypeError):
+                # Hub may only have base/MLM; build head from config and load backbone
+                model = AutoModelForSequenceClassification.from_config(
+                    hf_config, **_tr
+                )
+                _pretrained = AutoModelForMaskedLM.from_pretrained(
+                    model_path, config=hf_config, **_tr
+                )
+                model.load_state_dict(_pretrained.state_dict(), strict=False)
+                del _pretrained
         else:
             raise ValueError(f"Invalid task '{task}'.")
-
-        # Load pretrained weights (strict=False allows missing head weights)
-        state_dict = _download_state_dict(model_path)
-        model.load_state_dict(state_dict, strict=False)
 
         super().__init__(
             model=model,

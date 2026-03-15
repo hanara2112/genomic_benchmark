@@ -36,7 +36,12 @@ def main():
         splitter="random",
         reload=False,
     )
-    train, valid, test = datasets
+    # Handle 2 (train, test) or 3 (train, valid, test) splits
+    if len(datasets) == 2:
+        train, test = datasets
+        valid = train  # no separate valid; use train for simplicity
+    else:
+        train, valid, test = datasets[0], datasets[1], datasets[2]
     logger.info(
         "Loaded: train=%d, valid=%d, test=%d samples",
         len(train), len(valid), len(test),
