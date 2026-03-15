@@ -49,10 +49,13 @@ except (ImportError, ModuleNotFoundError):
                 return (pred, loss) if loss is not None else pred
 
         def _hf_loss(out: Any, _y: Any, _w: Any) -> torch.Tensor:
-            # Wrapper returns (pred, loss); TorchModel passes that as first arg to loss fn.
-            L = out[1] if isinstance(out, (tuple, list)) and len(out) > 1 else out
+            # TorchModel may pass (pred, loss) or [loss] when _loss_outputs is set; extract loss tensor.
+            if isinstance(out, (tuple, list)):
+                L = out[1] if len(out) > 1 else out[0]
+            else:
+                L = out
             if not isinstance(L, torch.Tensor):
-                L = torch.as_tensor(L)
+                raise RuntimeError("Model did not return a loss tensor (ensure labels are passed).")
             return L.mean() if L.ndim != 0 else L
 
         class HuggingFaceModel(TorchModel):
