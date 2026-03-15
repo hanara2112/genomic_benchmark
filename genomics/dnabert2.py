@@ -63,6 +63,18 @@ except (ImportError, ModuleNotFoundError):
 _DEFAULT_MODEL_PATH = "zhihan1996/DNABERT-2-117M"
 
 
+def _load_pretrained_state_dict(model_path: str) -> Dict[str, Any]:
+    """Load pretrained state dict to CPU (avoids meta device from model's custom code)."""
+    from huggingface_hub import hf_hub_download
+    try:
+        path = hf_hub_download(model_path, "model.safetensors")
+        from safetensors.torch import load_file
+        return load_file(path, device="cpu")
+    except Exception:
+        path = hf_hub_download(model_path, "pytorch_model.bin")
+        return torch.load(path, map_location="cpu", weights_only=True)
+
+
 def _stub_flash_attn_if_needed() -> None:
     """Stub flash_attn so DNABERT-2 custom code can load without the optional dependency."""
     _fake = types.ModuleType("flash_attn_triton")
@@ -194,35 +206,22 @@ class DNABERT2Model(HuggingFaceModel):
                 hf_config.problem_type = "multi_label_classification"
                 hf_config.num_labels = n_tasks
 
-        # Load model on CPU with real tensors (avoid device_map="meta" / low_cpu_mem_usage)
-        _tr = dict(trust_remote_code=True, low_cpu_mem_usage=False)
+        # Build on CPU only (from_config + state_dict avoids meta device in custom hub code)
+        _tr = dict(trust_remote_code=True)
         if task == "mlm":
-            model = AutoModelForMaskedLM.from_pretrained(
-                model_path, config=hf_config, **_tr
-            )
+            model = AutoModelForMaskedLM.from_config(hf_config, **_tr)
+            state = _load_pretrained_state_dict(model_path)
+            model.load_state_dict(state, strict=False)
         elif task == "feature_extractor":
-            model = AutoModel.from_pretrained(
-                model_path, config=hf_config, **_tr
-            )
+            model = AutoModel.from_config(hf_config, **_tr)
+            state = _load_pretrained_state_dict(model_path)
+            model.load_state_dict(state, strict=False)
         elif task in ("classification", "regression", "mtr"):
-            try:
-                model = AutoModelForSequenceClassification.from_pretrained(
-                    model_path, config=hf_config, **_tr
-                )
-            except (OSError, ValueError, TypeError):
-                # Hub may only have base/MLM; build head from config and load backbone
-                model = AutoModelForSequenceClassification.from_config(
-                    hf_config, **_tr
-                )
-                _pretrained = AutoModelForMaskedLM.from_pretrained(
-                    model_path, config=hf_config, **_tr
-                )
-                model.load_state_dict(_pretrained.state_dict(), strict=False)
-                del _pretrained
+            model = AutoModelForSequenceClassification.from_config(hf_config, **_tr)
+            state = _load_pretrained_state_dict(model_path)
+            model.load_state_dict(state, strict=False)
         else:
             raise ValueError(f"Invalid task '{task}'.")
-
-        model = model.to("cpu")
 
         super().__init__(
             model=model,
