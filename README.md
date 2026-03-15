@@ -2,9 +2,7 @@
 
 **Standalone review repo for DeepChem genomic sequence support.**
 
-A minimal, PR-review-ready repository that demonstrates a complete DeepChem-style genomics pipeline: featurizer → loader → model → evaluation. Designed for a DeepChem maintainer to scan in one sitting.
-
-**Full results & proposal:** All benchmark details and interpretation → **[docs/RESULTS.md](docs/RESULTS.md)**. **GSoC final proposal** → **[docs/GSoC_PROPOSAL_FINAL.md](docs/GSoC_PROPOSAL_FINAL.md)**.
+PR-review-ready repository that demonstrates a complete DeepChem-style genomics pipeline: featurizer → loader → model → evaluation. 
 
 ### Key results
 
