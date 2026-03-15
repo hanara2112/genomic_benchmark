@@ -24,17 +24,41 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-# HuggingFaceModel import: same pattern as ProtBERT/ChemBERTa in DeepChem.
+# Prefer DeepChem's HuggingFaceModel; fallback for Colab/slim installs that lack hf_models.
 try:
-    from deepchem.models.torch_models import HuggingFaceModel
-except ImportError:
+    from deepchem.models.torch_models.hf_models import HuggingFaceModel
+except (ImportError, ModuleNotFoundError):
     try:
-        from deepchem.models.torch_models.hf_models import HuggingFaceModel
-    except ImportError as e:
-        raise ImportError(
-            "HuggingFaceModel not found. Install DeepChem with PyTorch and "
-            "transformers: pip install 'deepchem[torch]' transformers"
-        ) from e
+        from deepchem.models.torch_models import HuggingFaceModel
+    except ImportError:
+        from deepchem.models.torch_models import TorchModel
+
+        class _HFWrapper(torch.nn.Module):
+            def __init__(self, hf_model: torch.nn.Module) -> None:
+                super().__init__()
+                self.hf_model = hf_model
+
+            def forward(self, inputs: Dict[str, torch.Tensor]) -> Any:
+                out = self.hf_model(**inputs)
+                pred = getattr(out, "logits", None) or getattr(out, "last_hidden_state", None)
+                if pred is None and isinstance(out, (tuple, list)) and out:
+                    pred = out[0]
+                loss = getattr(out, "loss", None)
+                return (pred, loss) if loss is not None else pred
+
+        def _hf_loss(out: Any, _y: Any, _w: Any) -> torch.Tensor:
+            # Wrapper returns (pred, loss); TorchModel passes that as first arg to loss fn.
+            L = out[1] if isinstance(out, (tuple, list)) and len(out) > 1 else out
+            if not isinstance(L, torch.Tensor):
+                L = torch.as_tensor(L)
+            return L.mean() if L.ndim != 0 else L
+
+        class HuggingFaceModel(TorchModel):
+            def __init__(self, model: torch.nn.Module, tokenizer: Any, task: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
+                self.task, self.tokenizer, self.config = task, tokenizer, config or {}
+                super().__init__(model=_HFWrapper(model), loss=_hf_loss, output_types=["prediction", "loss"], **kwargs)
+
+        logger.warning("Using bundled HuggingFaceModel (install 'deepchem[torch]' and 'transformers' for full support).")
 
 _DEFAULT_MODEL_PATH = "zhihan1996/DNABERT-2-117M"
 
