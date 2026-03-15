@@ -10,7 +10,7 @@ A minimal, PR-review-ready repository that demonstrates a complete DeepChem-styl
 
 On **dummy_mouse_enhancers_ensembl** (1.2K sequences), DNABERT-2 reaches **0.816 test ROC-AUC** (best of four models); on **human_nontata_promoters**, Random Forest reaches **0.98** and DNABERT-2 **0.966** test ROC-AUC with one epoch.
 
-![Test ROC-AUC](plots/plot_test_roc_mouse.png)
+![Model Comparison — dummy_mouse_enhancers_ensembl (ROC-AUC, Accuracy, F1)](./plots/output.png)
 
 
 ## Quick Start
