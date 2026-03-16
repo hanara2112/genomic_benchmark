@@ -14,6 +14,7 @@ arXiv:2306.15006
 import logging
 from typing import Any, Dict, Tuple, Optional
 
+import deepchem as dc
 import torch
 import torch.nn as nn
 from deepchem.models.torch_models.hf_models import HuggingFaceModel
@@ -32,10 +33,39 @@ _DEFAULT_MODEL = "zhihan1996/DNABERT-2-117M"
 
 
 class DNABERT2Model(HuggingFaceModel):
-    """DNABERT-2 model for DNA sequence learning.
+    """DNABERT-2 model for DNA sequence analysis.
 
     DNABERT-2 is a foundation model pretrained on large-scale
-    multi-species genomes using BPE tokenization.
+    multi-species genomes using byte-pair encoding (BPE) tokenization.
+    This wrapper subclasses ``HuggingFaceModel`` and follows the
+    same integration pattern as ChemBERTa and ProtBERT.
+
+    BPE tokenization is handled inside ``_prepare_batch`` — raw DNA
+    sequences are stored in ``X`` (via ``DummyFeaturizer``) and
+    tokenized on-the-fly during training, matching the standard
+    DeepChem HuggingFace model pattern.
+
+    Parameters
+    ----------
+    task : str
+        Learning task. One of ``'mlm'``, ``'classification'``,
+        ``'regression'``, ``'mtr'``, or ``'feature_extractor'``.
+    model_path : str, default 'zhihan1996/DNABERT-2-117M'
+        HuggingFace Hub model ID or local checkpoint path.
+    n_tasks : int, default 1
+        Number of output tasks.
+    config : dict or None, default None
+        Extra config overrides passed to
+        ``AutoConfig.from_pretrained()``.
+    max_seq_length : int, default 512
+        Maximum tokenised sequence length.
+    kwargs : dict
+        Additional arguments passed to ``HuggingFaceModel``.
+
+    References
+    ----------
+    .. Zhou, Z. et al. DNABERT-2: Efficient Foundation Model and
+       Benchmark for Multi-Species Genome. arXiv:2306.15006 (2023).
     """
 
     def __init__(
@@ -47,6 +77,7 @@ class DNABERT2Model(HuggingFaceModel):
         max_seq_length: int = 512,
         **kwargs,
     ):
+        """Initialize a DNABERT-2 model head."""
         self.n_tasks = n_tasks
         self.max_seq_length = max_seq_length
 
@@ -103,12 +134,20 @@ class DNABERT2Model(HuggingFaceModel):
                 out = out.mean(dim=1)
             return out
 
+        # Custom pooling logic
         model.forward = pooled_forward
+
+        # Use native DeepChem loss objects
+        if task == "classification":
+            loss = dc.models.losses.SoftmaxCrossEntropy()
+        else:
+            loss = dc.models.losses.L2Loss()
 
         super().__init__(
             model=model,
             tokenizer=tokenizer,
             task=task,
+            loss=loss,
             **kwargs,
         )
 
@@ -116,7 +155,28 @@ class DNABERT2Model(HuggingFaceModel):
         self,
         batch: Tuple[Any, Any, Any],
     ) -> Tuple[Dict[str, torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        """Tokenize DNA sequences and prepare labels."""
+        """Prepare a batch for DNABERT-2.
+
+        Tokenizes raw DNA sequences using the BPE tokenizer loaded
+        at initialization. Follows the same pattern as ChemBERTa's
+        ``_prepare_batch``.
+
+        Parameters
+        ----------
+        batch : tuple
+            ``(inputs, labels, weights)`` from the DeepChem data
+            loader. ``inputs[0]`` contains raw DNA sequence strings.
+
+        Returns
+        -------
+        inputs_dict : dict
+            Tokenized inputs with ``input_ids``, ``attention_mask``,
+            and optionally ``labels``.
+        y_tensor : Tensor or None
+            Label tensor.
+        w_tensor : Tensor or None
+            Weight tensor.
+        """
         X, y, w = batch
 
         # Handle potential numpy dimensionality from loader
