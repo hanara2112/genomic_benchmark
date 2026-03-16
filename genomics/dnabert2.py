@@ -1,247 +1,109 @@
-"""DNABERT-2: Efficient Foundation Model for Multi-Species Genome.
+"""
+DNABERT-2: Efficient Foundation Model for Multi-Species Genome.
 
-DeepChem-native wrapper for DNABERT-2 [1]_. Subclasses
-``HuggingFaceModel`` and follows the same pattern as ChemBERTa and
-ProtBERT. BPE tokenization is handled inside ``_prepare_batch``
-(no separate featurizer needed).
+DeepChem wrapper for DNABERT-2 following the ChemBERTa integration
+pattern used in DeepChem.
 
-Target location in DeepChem:
-``deepchem/models/torch_models/dnabert2.py``
-
-References
-----------
-.. [1] Zhou, Z., Ji, Y., Li, W., Dutta, P., Davuluri, R., & Liu, H.
-   (2023). DNABERT-2: Efficient Foundation Model and Benchmark for
-   Multi-Species Genome. arXiv:2306.15006.
+Reference
+---------
+Zhou et al. (2023)
+DNABERT-2: Efficient Foundation Model and Benchmark for Multi-Species Genome.
+arXiv:2306.15006
 """
 
 import logging
-import sys
-import types
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple, Optional
 
 import torch
+import torch.nn as nn
+from deepchem.models.torch_models.hf_models import HuggingFaceModel
+
+from transformers import (
+    AutoTokenizer,
+    AutoConfig,
+    AutoModel,
+    AutoModelForMaskedLM,
+    AutoModelForSequenceClassification,
+)
 
 logger = logging.getLogger(__name__)
 
-# Prefer DeepChem's HuggingFaceModel; fallback for Colab/slim installs that lack hf_models.
-try:
-    from deepchem.models.torch_models.hf_models import HuggingFaceModel
-except (ImportError, ModuleNotFoundError):
-    try:
-        from deepchem.models.torch_models import HuggingFaceModel
-    except ImportError:
-        from deepchem.models.torch_models import TorchModel
-
-        class _HFWrapper(torch.nn.Module):
-            def __init__(self, hf_model: torch.nn.Module) -> None:
-                super().__init__()
-                self.hf_model = hf_model
-
-            def forward(self, inputs: Dict[str, torch.Tensor]) -> Any:
-                out = self.hf_model(**inputs)
-                pred = getattr(out, "logits", None)
-                if pred is None:
-                    pred = getattr(out, "last_hidden_state", None)
-                if pred is None and isinstance(out, (tuple, list)) and len(out) > 0:
-                    pred = out[0]
-                loss = getattr(out, "loss", None)
-                return (pred, loss) if loss is not None else pred
-
-        def _hf_loss(out: Any, _y: Any, _w: Any) -> torch.Tensor:
-            # TorchModel may pass (pred, loss) or [loss] when _loss_outputs is set; extract loss tensor.
-            if isinstance(out, (tuple, list)):
-                L = out[1] if len(out) > 1 else out[0]
-            else:
-                L = out
-            if not isinstance(L, torch.Tensor):
-                raise RuntimeError("Model did not return a loss tensor (ensure labels are passed).")
-            return L.mean() if L.ndim != 0 else L
-
-        class HuggingFaceModel(TorchModel):
-            def __init__(self, model: torch.nn.Module, tokenizer: Any, task: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
-                self.task, self.tokenizer, self.config = task, tokenizer, config or {}
-                super().__init__(model=_HFWrapper(model), loss=_hf_loss, output_types=["prediction", "loss"], **kwargs)
-
-        logger.warning("Using bundled HuggingFaceModel (install 'deepchem[torch]' and 'transformers' for full support).")
-
-_DEFAULT_MODEL_PATH = "zhihan1996/DNABERT-2-117M"
-
-
-def _load_pretrained_state_dict(model_path: str) -> Dict[str, Any]:
-    """Load pretrained state dict to CPU (avoids meta device from model's custom code)."""
-    from huggingface_hub import hf_hub_download
-    try:
-        path = hf_hub_download(model_path, "model.safetensors")
-        from safetensors.torch import load_file
-        return load_file(path, device="cpu")
-    except Exception:
-        path = hf_hub_download(model_path, "pytorch_model.bin")
-        return torch.load(path, map_location="cpu", weights_only=True)
-
-
-def _materialize_meta_tensors(module: torch.nn.Module) -> None:
-    """Move any parameters/buffers on device 'meta' to CPU (custom from_config can leave them on meta)."""
-    for _, param in module.named_parameters(recurse=True):
-        if getattr(param, "device", None) and str(param.device) == "meta":
-            param.data = torch.empty_like(param, device="cpu")
-    for name, buf in module.named_buffers(recurse=True):
-        if getattr(buf, "device", None) and str(buf.device) == "meta":
-            parts = name.split(".")
-            parent = module.get_submodule(".".join(parts[:-1])) if len(parts) > 1 else module
-            parent.register_buffer(parts[-1], torch.empty_like(buf, device="cpu"))
-
-
-def _stub_flash_attn_if_needed() -> None:
-    """Stub flash_attn so DNABERT-2 custom code can load without the optional dependency."""
-    _fake = types.ModuleType("flash_attn_triton")
-    _fake.flash_attn_qkvpacked_func = None  # type: ignore[attr-defined]
-    for key in list(sys.modules.keys()):
-        if "flash_attn_triton" in key:
-            sys.modules[key] = _fake
+_DEFAULT_MODEL = "zhihan1996/DNABERT-2-117M"
 
 
 class DNABERT2Model(HuggingFaceModel):
-    """DNABERT-2 model for DNA sequence analysis.
+    """DNABERT-2 model for DNA sequence learning.
 
     DNABERT-2 is a foundation model pretrained on large-scale
-    multi-species genomes using byte-pair encoding (BPE) tokenization.
-    This wrapper subclasses ``HuggingFaceModel`` and follows the
-    same integration pattern as ChemBERTa and ProtBERT.
-
-    BPE tokenization is handled inside ``_prepare_batch`` — raw DNA
-    sequences are stored in ``X`` (via ``DummyFeaturizer``) and
-    tokenized on-the-fly during training, matching the standard
-    DeepChem HuggingFace model pattern.
-
-    Parameters
-    ----------
-    task : str
-        Learning task. One of ``'mlm'``, ``'classification'``,
-        ``'regression'``, ``'mtr'``, or ``'feature_extractor'``.
-    model_path : str, default 'zhihan1996/DNABERT-2-117M'
-        HuggingFace Hub model ID or local checkpoint path.
-    n_tasks : int, default 1
-        Number of output tasks.
-    config : dict or None, default None
-        Extra config overrides passed to
-        ``AutoConfig.from_pretrained()``.
-    max_seq_length : int, default 512
-        Maximum tokenised sequence length.
-    kwargs : dict
-        Additional arguments passed to ``HuggingFaceModel``.
-
-    Examples
-    --------
-    >>> import os
-    >>> import tempfile
-    >>> import numpy as np
-    >>> import deepchem as dc
-    >>> # Prepare toy dataset (raw DNA sequences)
-    >>> seqs = np.array(["ACGTACGT", "TGCATGCA", "GGGGCCCC"])
-    >>> labels = np.array([0, 1, 0]).reshape(-1, 1).astype(np.float32)
-    >>> dataset = dc.data.NumpyDataset(X=seqs, y=labels)
-    >>> # Instantiate model
-    >>> model_dir = os.path.join(tempfile.mkdtemp(), "dnabert2")
-    >>> model = DNABERT2Model(
-    ...     task="classification",
-    ...     n_tasks=1,
-    ...     model_dir=model_dir,
-    ...     batch_size=2,
-    ...     learning_rate=2e-5,
-    ... )
-
-    Reference
-    ---------
-    .. Zhou, Z. et al. DNABERT-2: Efficient Foundation Model and
-       Benchmark for Multi-Species Genome. arXiv:2306.15006 (2023).
+    multi-species genomes using BPE tokenization.
     """
 
     def __init__(
         self,
         task: str,
-        model_path: str = _DEFAULT_MODEL_PATH,
+        model_path: str = _DEFAULT_MODEL,
         n_tasks: int = 1,
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict] = None,
         max_seq_length: int = 512,
-        **kwargs: Any,
-    ) -> None:
-        from transformers import (
-            AutoConfig,
-            AutoModel,
-            AutoModelForMaskedLM,
-            AutoModelForSequenceClassification,
-            AutoTokenizer,
-        )
-
-        _stub_flash_attn_if_needed()
-
+        **kwargs,
+    ):
         self.n_tasks = n_tasks
         self.max_seq_length = max_seq_length
 
-        config_dict: Dict[str, Any] = config if config is not None else {}
-
-        # Load BPE tokenizer
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
             trust_remote_code=True,
             model_max_length=max_seq_length,
         )
 
-        # Load and patch config (fixes config_class mismatch on HF Hub)
         hf_config = AutoConfig.from_pretrained(
             model_path,
             trust_remote_code=True,
-            **config_dict,
+            **(config or {}),
         )
 
-        _config_defaults: Dict[str, Any] = {
-            "is_decoder": False,
-            "pad_token_id": (
-                tokenizer.pad_token_id
-                if tokenizer.pad_token_id is not None else 0
-            ),
-            "bos_token_id": getattr(tokenizer, "bos_token_id", None),
-            "eos_token_id": getattr(tokenizer, "eos_token_id", None),
-        }
-        for attr, default in _config_defaults.items():
-            if not hasattr(hf_config, attr):
-                setattr(hf_config, attr, default)
-
-        if getattr(hf_config, "attention_probs_dropout_prob", 0.0) == 0.0:
-            hf_config.attention_probs_dropout_prob = 1e-8
-
-        # Task-specific config 
-        if task in ("regression", "mtr"):
-            hf_config.num_labels = n_tasks
+        # Set task-specific config
+        if task in ["regression", "mtr"]:
             hf_config.problem_type = "regression"
+            hf_config.num_labels = n_tasks
         elif task == "classification":
-            if n_tasks == 1:
-                hf_config.problem_type = "single_label_classification"
-                hf_config.num_labels = 2
-            else:
-                hf_config.problem_type = "multi_label_classification"
-                hf_config.num_labels = n_tasks
+            hf_config.num_labels = 2 if n_tasks == 1 else n_tasks
+            hf_config.problem_type = (
+                "single_label_classification"
+                if n_tasks == 1
+                else "multi_label_classification"
+            )
 
-        # Build on CPU only (from_config + state_dict avoids meta device in custom hub code)
-        _tr = dict(trust_remote_code=True)
+        # Load appropriate model head
         if task == "mlm":
-            model = AutoModelForMaskedLM.from_config(hf_config, **_tr)
-            state = _load_pretrained_state_dict(model_path)
-            model.load_state_dict(state, strict=False)
+            model = AutoModelForMaskedLM.from_pretrained(
+                model_path, config=hf_config, trust_remote_code=True
+            )
+        elif task in ["classification", "regression", "mtr"]:
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_path, config=hf_config, trust_remote_code=True
+            )
         elif task == "feature_extractor":
-            model = AutoModel.from_config(hf_config, **_tr)
-            state = _load_pretrained_state_dict(model_path)
-            model.load_state_dict(state, strict=False)
-        elif task in ("classification", "regression", "mtr"):
-            model = AutoModelForSequenceClassification.from_config(hf_config, **_tr)
-            state = _load_pretrained_state_dict(model_path)
-            model.load_state_dict(state, strict=False)
+            model = AutoModel.from_pretrained(
+                model_path, config=hf_config, trust_remote_code=True
+            )
         else:
-            raise ValueError(f"Invalid task '{task}'.")
+            raise ValueError(f"Invalid task: {task}")
 
-        _materialize_meta_tensors(model)
-        model = model.to("cpu")
+        # The DNABERT-2 Hub model returns token-level logits (3D) even for classification.
+        # We patch the model's forward to average across the sequence (Pooling).
+        original_forward = model.forward
+
+        def pooled_forward(*args, **kwargs):
+            out = original_forward(*args, **kwargs)
+            # If the output (logits) is 3D (Batch, Seq, Labels), we pool it to 2D (Batch, Labels)
+            if hasattr(out, "logits") and out.logits is not None and out.logits.ndim == 3:
+                out.logits = out.logits.mean(dim=1)
+            elif isinstance(out, torch.Tensor) and out.ndim == 3:
+                out = out.mean(dim=1)
+            return out
+
+        model.forward = pooled_forward
 
         super().__init__(
             model=model,
@@ -253,39 +115,17 @@ class DNABERT2Model(HuggingFaceModel):
     def _prepare_batch(
         self,
         batch: Tuple[Any, Any, Any],
-    ) -> Tuple[Dict[str, torch.Tensor], Any, Any]:
-        """Prepare a batch for DNABERT-2.
+    ) -> Tuple[Dict[str, torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Tokenize DNA sequences and prepare labels."""
+        X, y, w = batch
 
-        Tokenizes raw DNA sequences using the BPE tokenizer loaded
-        at initialization. Follows the same pattern as ChemBERTa's
-        ``_prepare_batch``.
-
-        Parameters
-        ----------
-        batch : tuple
-            ``(inputs, labels, weights)`` from the DeepChem data
-            loader. ``inputs[0]`` contains raw DNA sequence strings.
-
-        Returns
-        -------
-        inputs_dict : dict
-            Tokenized inputs with ``input_ids``, ``attention_mask``,
-            and optionally ``labels``.
-        y_tensor : Tensor or None
-            Label tensor.
-        w_tensor : Tensor or None
-            Weight tensor.
-        """
-        inputs, labels, weights = batch
-        # Note: We keep ambiguous bases ('N') as DNABERT-2's BPE handles them via subword fallback.
-        # inputs[0] is the batch of DNA sequences. We handle both (B,) and (B, 1) shapes.
-        X_batch = inputs[0]
-        if len(X_batch.shape) > 1:
+        # Handle potential numpy dimensionality from loader
+        X_batch = X[0]
+        if hasattr(X_batch, "shape") and len(X_batch.shape) > 1:
             X_batch = X_batch.flatten()
+        
         sequences = [str(seq).upper() for seq in X_batch]
 
-        # Tokenizer automatically generates input_ids and attention_mask.
-        # Sequences are padded/truncated to max_seq_length for uniform batch tensors.
         tokens = self.tokenizer(
             sequences,
             padding=True,
@@ -294,26 +134,18 @@ class DNABERT2Model(HuggingFaceModel):
             return_tensors="pt",
         )
 
-        inputs_dict = {k: v.to(self.device) for k, v in tokens.items()}
+        inputs = {k: v.to(self.device) for k, v in tokens.items()}
 
         y_tensor = None
-        if labels is not None:
+        if y is not None:
+            # We don't pass 'labels' inside inputs to avoid buggy internal 
+            # loss calculations in some Hub model versions. 
+            # TorchModel handles loss using the returned y_tensor instead.
             if self.task == "classification" and self.n_tasks == 1:
-                y_tensor = torch.as_tensor(
-                    labels[0].squeeze(-1),
-                    dtype=torch.long,
-                    device=self.device,
-                )
+                y_tensor = torch.as_tensor(y[0].flatten(), dtype=torch.long, device=self.device)
             else:
-                y_tensor = torch.as_tensor(
-                    labels[0], dtype=torch.float32, device=self.device
-                )
-            inputs_dict["labels"] = y_tensor
+                y_tensor = torch.as_tensor(y[0], dtype=torch.float32, device=self.device)
 
-        w_tensor = None
-        if weights is not None:
-            w_tensor = torch.as_tensor(
-                weights[0], dtype=torch.float32, device=self.device
-            )
+        w_tensor = torch.as_tensor(w[0], dtype=torch.float32, device=self.device) if w is not None else None
 
-        return inputs_dict, y_tensor, w_tensor
+        return inputs, y_tensor, w_tensor
